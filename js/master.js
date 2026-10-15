@@ -44,15 +44,9 @@ $window.load(function(){
 });
 
 
-var app = angular.module('conjecture', ['ngClipboard'])
+var shadeScroller;
 
-.config(
-	['ngClipProvider', 
-		function(ngClipProvider) {
-		    ngClipProvider.setPath("js/vendor/ZeroClipboard.swf");
-		}
-	]
-)
+var app = angular.module('conjecture', [])
 
 .controller('MainCtrl', function($window, $scope, $http, $interval, $timeout) {
 
@@ -203,8 +197,6 @@ var app = angular.module('conjecture', ['ngClipboard'])
 				mother.to[i].selected = false;
 		}
 
-		console.log(block)
-
 		var selection = window.getSelection(),
 			range = document.createRange(),
 			text;
@@ -213,8 +205,6 @@ var app = angular.module('conjecture', ['ngClipboard'])
 			text = $($event.target).children()[0];
 		else
 			text = $($event.target).find('.actualBlock').children()[0];
-
-		console.log($($event.target))
 
         range.selectNodeContents(text);
         selection.removeAllRanges();
@@ -236,62 +226,70 @@ var app = angular.module('conjecture', ['ngClipboard'])
 
 	$scope.translate = function(query, target, language){
 
-		console.log(query, target, language)
+		if (!query || query.trim() === '') return;
 
-		if (query !== ''){
+		var other = (language === 'strange') ? 'mother' : 'strange';
+		var direction =
+			$scope.tongueAvailable[ $scope.tongueUser[language] ].translate +
+			'|' +
+			$scope.tongueAvailable[ $scope.tongueUser[other] ].translate;
 
-			if (language === 'strange'){
-				// direction = 'de|en';
-				direction = 
-					$scope.tongueAvailable[ $scope.tongueUser.strange ].translate + 
-					'|' + 
-					$scope.tongueAvailable[ $scope.tongueUser.mother ].translate;
-			}
-			else{
-				// direction = 'en|de';
-				direction = 
-					$scope.tongueAvailable[ $scope.tongueUser.mother ].translate + 
-					'|' + 
-					$scope.tongueAvailable[ $scope.tongueUser.strange ].translate;
-			}
+		var block = $scope[language].to[target];
+		if (!block) return;
 
-			$scope[language].to[target].loading = true;
+		block.loading = true;
 
-			$.ajax({
-				type: 'GET',
-				url: 'http://api.mymemory.translated.net/get?q=' + query + '&langpair=' + direction
-			}).done( function(response, status){
-				var incoming = response.responseData.translatedText.split(' '),
-					composite = '';
-
-				$scope[language].to[target].content = [];
-
-
-				for (var i in incoming){
-					composite += incoming[i] + ' ';
-
-					$scope[language].to[target].content.push(
-						{
-							selected: false,
-							display: incoming[i],
-							values: [
-								{ 
-									word: incoming[i], 
-									chosen: true 
-								}
-							]
-						}
-					);
-				}
-
-				$scope[language].to[target].loading = false;
-				$scope[language].to[target].composite = composite;
-
-				$scope.$apply();
-
-				$scope.equalizer(language, target);
-			});
+		function fail(){
+			block.loading = false;
+			block.composite = '(translation failed — try again)';
+			block.content = [];
+			$scope.$evalAsync();
 		}
+
+		$.ajax({
+			type: 'GET',
+			url: 'https://api.mymemory.translated.net/get',
+			data: { q: query, langpair: direction },
+			dataType: 'json'
+		}).done( function(response){
+
+			// MyMemory reports quota / errors inside a 200 body
+			if (
+				!response || !response.responseData ||
+				String(response.responseStatus) !== '200' ||
+				response.quotaFinished
+			){
+				return fail();
+			}
+
+			var incoming = response.responseData.translatedText.split(/\s+/).filter(Boolean),
+				composite = '';
+
+			block.content = [];
+
+			for (var i = 0; i < incoming.length; i++){
+				composite += incoming[i] + ' ';
+
+				block.content.push({
+					selected: false,
+					display: incoming[i],
+					fetched: false,
+					values: [
+						{
+							word: incoming[i],
+							chosen: true
+						}
+					]
+				});
+			}
+
+			block.loading = false;
+			block.composite = composite;
+
+			$scope.$apply();
+
+			$scope.equalizer(language, target);
+		}).fail( fail );
 	}
 
 	// 	                                                                                                                   
@@ -308,41 +306,62 @@ var app = angular.module('conjecture', ['ngClipboard'])
 
 	$scope.synonymous = function(query, word, target, language){
 
-		console.log(query)
-		console.log(word)
-		console.log(target)
-		console.log(language)
+		var theLang = (language === 'strange') ? 'mother' : 'strange';
 
-		if (language === 'strange') theLang = 'mother';
-			else theLang = 'strange';
+		var block = $scope[language].to[target];
+		var entry = block && block.content[word];
+
+		// one lookup per word; mouseover fires constantly
+		if (!entry || entry.fetched || entry.fetching) return;
+
+		// strip punctuation attached to the token before looking it up
+		var clean = query.replace(/[!@#$%^&*()_+=\[\]{}|\\<>,.?\/~`:;"“”„«»¿¡]+/g, '').trim();
+		if (clean === '') return;
+
+		entry.fetching = true;
 
 		$.ajax({
 			type: 'GET',
-			dataType: 'jsonp', 
-			url: 'http://thesaurus.altervista.org/thesaurus/v1?word=' + query + '&language=' + $scope.tongueAvailable[ $scope.tongueUser[ theLang ] ].thesaurus + '&key=lUigdQQMwGstukSQhYCI&output=json'
+			dataType: 'json',
+			timeout: 8000,
+			url: 'api/synonyms',
+			data: {
+				word: clean,
+				language: $scope.tongueAvailable[ $scope.tongueUser[ theLang ] ].thesaurus
+			}
+		}).done( function(response){
 
-		}).done( function(response, status){
+			entry.fetching = false;
+			entry.fetched = true;
 
-			console.log(response)
+			var seen = {};
+			seen[ entry.display ] = true;
 
-			var reactions = response.response[0].list.synonyms.split('|')
+			var lists = (response && response.response) || [];
 
-			console.log(reactions)
+			for (var k = 0; k < lists.length; k++){
+				var raw = lists[k] && lists[k].list && lists[k].list.synonyms;
+				if (!raw) continue;
 
-			for (var j = 0; j < reactions.length; j++){
-				$scope[language].to[target].content[word].values.push( {
-					word: reactions[j], 
-					chosen: false
-				} );
+				var reactions = raw.split('|');
+
+				for (var j = 0; j < reactions.length; j++){
+					var w = reactions[j].replace(/\s*\(.*?\)\s*$/, '').trim();
+
+					if (w && !seen[w] && entry.values.length < 25){
+						seen[w] = true;
+						entry.values.push({ word: w, chosen: false });
+					}
+				}
 			}
 
 			$scope.$apply();
 
 			$scope.equalizer(language, target);
-		}).fail( function(jqXHR, textStatus, errorThrown){
-			console.log(jqXHR)
-			console.log(textStatus)
-			console.log(errorThrown)
+		}).fail( function(){
+			// the API errors on unknown words; don't hammer it with retries
+			entry.fetching = false;
+			entry.fetched = true;
 		});
 
 	}
@@ -375,8 +394,6 @@ var app = angular.module('conjecture', ['ngClipboard'])
 		}
 
 		$scope[language].to[languageTarget].composite = subComposite;
-
-		console.log($scope[language].to[languageTarget].composite)
 
 	}
 
@@ -529,7 +546,7 @@ var app = angular.module('conjecture', ['ngClipboard'])
 		var $strange_from = $('.strange_from'),
 			$strange_from_height = 0;
 
-			$strange_to = $('.strange_to');
+			$strange_to = $('.strange_to'),
 			$strange_to_height = 0;
 
 		$strange_from.find('.block').each(function(e){
@@ -1022,6 +1039,37 @@ var app = angular.module('conjecture', ['ngClipboard'])
 	    };
 	}
 ])
+
+// Replaces the Flash-based ngClip: copies the evaluated clip-copy expression on click
+.directive('clipCopy', function () {
+    return {
+        restrict: 'A',
+        link: function (scope, element, attrs) {
+            element.on('click', function () {
+                var text = scope.$eval(attrs.clipCopy);
+
+                if (text === undefined || text === null) return;
+                text = String(text).trim();
+
+                function fallback(){
+                    var ta = document.createElement('textarea');
+                    ta.value = text;
+                    ta.style.position = 'fixed';
+                    ta.style.opacity = '0';
+                    document.body.appendChild(ta);
+                    ta.select();
+                    try { document.execCommand('copy'); } catch (err) {}
+                    document.body.removeChild(ta);
+                }
+
+                if (navigator.clipboard && navigator.clipboard.writeText)
+                    navigator.clipboard.writeText(text).catch(fallback);
+                else
+                    fallback();
+            });
+        }
+    };
+})
 
 .directive('stopit', function () {
     return {

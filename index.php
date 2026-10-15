@@ -201,9 +201,9 @@
 							ng-keydown="from($event, $index, 'mother')"
 							ng-keyup="from($event, $index, 'mother')"
 							init-focus
-							stopEvent>
+							stopit>
 						</textarea>
-						<div class="copy"><span class="delicate">{{ block }}</span></div>
+						<div class="copy"><span class="delicate">{{ block.content }}</span></div>
 					</div>
 				</div>	
 
@@ -239,7 +239,7 @@
 					>
 						<span 
 							class="closer"
-							ng-click="closeBlock($event, $index, 'strange')"
+							ng-click="closeBlock($event, $index, 'mother')"
 						></span>
 						<div class="loader"></div>
 

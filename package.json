@@ -1,0 +1,14 @@
+{
+  "name": "conject",
+  "version": "1.0.1",
+  "private": true,
+  "description": "Con.ject: a sexy update to translate.google.com",
+  "scripts": {
+    "start": "node server/server.js"
+  },
+  "engines": { "node": ">=16" },
+  "dependencies": {
+    "express": "^4.19.2",
+    "mysql2": "^3.9.7"
+  }
+}
